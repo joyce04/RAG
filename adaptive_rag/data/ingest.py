@@ -6,7 +6,7 @@ from pathlib import Path
 import fire
 
 from dotenv import load_dotenv
-from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain_text_splitters import MarkdownHeaderTextSplitter #RecursiveCharacterTextSplitter
 from langchain_chroma import Chroma
 from langchain_community.document_loaders import PyPDFDirectoryLoader #WebBaseLoader
 from langchain_openai import OpenAIEmbeddings
@@ -248,11 +248,24 @@ def ingest(
     ]
 
     # 4. Split text chunks
-    text_splitter = RecursiveCharacterTextSplitter(
-        chunk_size=500,
-        chunk_overlap=100,
-    )
-    text_splits = text_splitter.split_documents(stitched_docs)
+    # text_splitter = RecursiveCharacterTextSplitter(
+    #     chunk_size=500,
+    #     chunk_overlap=100,
+    # )
+    # text_splits = text_splitter.split_documents(stitched_docs)
+    headers_to_split_on = [
+        ("#", "Header 1"),
+        ("##", "Header 2"),
+        ("###", "Header 3"),
+    ]
+    markdown_splitter = MarkdownHeaderTextSplitter(headers_to_split_on=headers_to_split_on)
+    
+    text_splits = []
+    for doc in stitched_docs:
+        md_header_splits = markdown_splitter.split_text(doc.page_content)
+        for split in md_header_splits:
+            split.metadata.update(doc.metadata)
+        text_splits.extend(md_header_splits)
 
     # 5. Combine: split text + whole tables
     all_chunks = text_splits + table_docs
