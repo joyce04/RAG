@@ -1,9 +1,12 @@
+import logging
 from typing import Any, Dict
 
-from graph.chains.generation import generation_chain
+from graph.chains.generator import generation_chain
 from graph.state import GraphState
 
-def generate(state: StateGraph) -> Dict[str, Any]:
+logger = logging.getLogger(__name__)
+
+def generate(state: GraphState) -> Dict[str, Any]:
     """
     Generate answer using the vectorstore
     """
@@ -17,6 +20,11 @@ def generate(state: StateGraph) -> Dict[str, Any]:
         'question': question
     })
 
-    return {'question':question, 
-    'documents':documents, 
-    'generation': generation}
+    retry_count = state.get('retry_count', 0) + 1
+
+    return {
+        'question': question,
+        'documents': documents,
+        'generation': generation,
+        'retry_count': retry_count,
+    }

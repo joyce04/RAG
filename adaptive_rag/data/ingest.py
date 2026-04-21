@@ -288,7 +288,43 @@ def ingest(
     )
     retriever = vectorstore.as_retriever()
 
+    retriever = vectorstore.as_retriever()
     print("Ingestion complete.")
+    return retriever
+
+
+# ──────────────────────────────────────────────
+# Lazy retriever (loads from existing ChromaDB)
+# ──────────────────────────────────────────────
+_retriever = None
+
+
+def get_retriever():
+    """
+    Return a retriever backed by the existing ChromaDB collection.
+    Initialized on first call (lazy) so importing this module during ingestion
+    does not open a DB connection prematurely.
+
+    Raises RuntimeError if the collection is empty (ingest() has not been run).
+    """
+    global _retriever
+    if _retriever is None:
+        vectorstore = Chroma(
+            collection_name='rag-chroma',
+            persist_directory='./data/chroma_db',
+            embedding_function=OpenAIEmbeddings(
+                model='text-embedding-3-small',
+                openai_api_base='https://openrouter.ai/api/v1',
+                openai_api_key=os.environ.get('OPENROUTER_API_KEY'),
+            ),
+        )
+        if vectorstore._collection.count() == 0:
+            raise RuntimeError(
+                "ChromaDB collection 'rag-chroma' is empty. "
+                "Run `uv run python data/ingest.py` first to populate it."
+            )
+        _retriever = vectorstore.as_retriever()
+    return _retriever
 
 
 if __name__ == "__main__":

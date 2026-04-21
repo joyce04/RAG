@@ -39,6 +39,8 @@ logger = logging.getLogger(__name__)
 # Router datasource constant (must match the value from RouteQuery schema)
 DATASOURCE_VECTORSTORE = "vectorstore"
 
+MAX_RETRIES = 3
+
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Edge Decision Functions
@@ -119,6 +121,11 @@ def grade_generation(state: GraphState) -> str:
     question = state["question"]
     documents = state["documents"]
     generation = state["generation"]
+    retry_count = state.get("retry_count", 0)
+
+    if retry_count >= MAX_RETRIES:
+        logger.warning("Max retries (%d) reached — accepting current generation", MAX_RETRIES)
+        return GRADE_USEFUL
 
     # ── Stage 1: Hallucination check ────────────────────────────────────
     # Verify the generation is grounded in the source documents.

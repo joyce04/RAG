@@ -1,22 +1,11 @@
 """
 Generation chain — produces answers from retrieved documents via OpenRouter.
 """
-import os
 
-from dotenv import load_dotenv
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_openai import ChatOpenAI
 
-load_dotenv()
-
-# ── LLM: OpenRouter (OpenAI-compatible) ────────────────────────────────────
-llm = ChatOpenAI(
-    model=os.environ.get("OPENROUTER_MODEL", "openai/gpt-4o-mini"),
-    temperature=0,
-    base_url="https://openrouter.ai/api/v1",
-    api_key=os.environ.get("OPENROUTER_API_KEY"),
-)
+from graph.chains.llm import default_llm
 
 # ── Prompt: Korean competition law domain ──────────────────────────────────
 prompt = ChatPromptTemplate.from_messages([
@@ -36,4 +25,4 @@ prompt = ChatPromptTemplate.from_messages([
 # ── LCEL chain ─────────────────────────────────────────────────────────────
 # Input: {"context": <docs>, "question": <str>}
 # Output: plain string answer
-generation_chain = prompt | llm | StrOutputParser()
+generation_chain = prompt | default_llm | StrOutputParser()
