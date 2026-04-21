@@ -37,6 +37,7 @@ Copy `.env.example` to `.env` and fill in:
 ```
 OPENROUTER_API_KEY=your_openrouter_key_here
 TAVILY_API_KEY=your_tavily_key_here
+LLAMA_CLOUD_API_KEY=your_llama_cloud_key_here
 
 # Model to use via OpenRouter (default: openai/gpt-4o-mini)
 OPENROUTER_MODEL=openai/gpt-4o-mini
