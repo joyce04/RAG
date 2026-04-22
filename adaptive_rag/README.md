@@ -1,6 +1,6 @@
 ## Demo
 
-![Adaptive RAG UI](img/rag_kor_comp_screenshot.png)
+<video src="img/rag_kor_comp.mov" controls width="100%"></video>
 
 The web UI provides a chat interface for querying Korean competition law cases with RAG system. Each answer cites its source documents as reference chips below the response; clicking a chip opens the original PDF in the right-hand document viewer.
 
