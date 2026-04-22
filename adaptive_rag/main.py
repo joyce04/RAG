@@ -4,10 +4,29 @@ from fastapi import FastAPI, Depends, HTTPException, Header, Request, APIRouter
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
+from pydantic import BaseModel as PydanticBase
+from typing import Optional, List
+from datetime import datetime
 from sqlalchemy.orm import Session
 from dotenv import load_dotenv
 from database import engine, get_db
 import models
+
+
+class ReferenceOut(PydanticBase):
+    source: str
+    page: int
+    snippet: str
+
+class MessageOut(PydanticBase):
+    id: str
+    session_id: str
+    role: str
+    content: str
+    references: Optional[List[ReferenceOut]] = None
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
 
 load_dotenv()
 
@@ -104,7 +123,7 @@ def create_session(session_data: SessionCreate, current_user: models.User = Depe
     db.refresh(new_session)
     return new_session
 
-@api_router.get("/sessions/{session_id}/messages")
+@api_router.get("/sessions/{session_id}/messages", response_model=List[MessageOut])
 def get_messages(session_id: str, current_user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
     sess = db.query(models.Session).filter(models.Session.id == session_id, models.Session.user_id == current_user.id).first()
     if not sess:
@@ -125,7 +144,7 @@ class ChatRequest(BaseModel):
     session_id: str
     question: str
 
-@api_router.post("/chat")
+@api_router.post("/chat", response_model=MessageOut)
 def chat_request(req: ChatRequest, current_user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
     sess = db.query(models.Session).filter(models.Session.id == req.session_id, models.Session.user_id == current_user.id).first()
     if not sess:
@@ -161,8 +180,6 @@ def chat_request(req: ChatRequest, current_user: models.User = Depends(get_curre
         db.commit()
 
     return assistant_msg
-
-app.include_router(api_router)
 
 # Mount static files for PDFs
 # Documents are inside data/korean_competition_law_cases
