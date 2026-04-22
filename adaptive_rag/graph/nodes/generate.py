@@ -14,10 +14,12 @@ def generate(state: GraphState) -> Dict[str, Any]:
     
     question = state['question']
     documents = state['documents']
+    chat_history = state.get('chat_history', [])
 
     generation_obj = generation_chain.invoke({
         'context': documents,
-        'question': question
+        'question': question,
+        'chat_history': chat_history
     })
 
     retry_count = state.get('retry_count', 0) + 1

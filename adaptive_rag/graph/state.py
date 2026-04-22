@@ -8,6 +8,7 @@ class GraphState(TypedDict):
     Represent the state of the graph.
     """
     question: str
+    chat_history: List[dict]
     documents: List[Document]
     generation: str
     references: list

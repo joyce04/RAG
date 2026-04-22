@@ -4,7 +4,7 @@ import { useEffect, useState, useRef, FormEvent } from "react";
 import { signOut, useSession } from "next-auth/react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { LogOut, Plus, MessageSquare, ChevronRight, X, User as UserIcon, Bot, FileText } from "lucide-react";
+import { LogOut, Plus, MessageSquare, ChevronRight, X, User as UserIcon, Bot, FileText, Trash2 } from "lucide-react";
 
 type Reference = {
   source: string;
@@ -102,12 +102,29 @@ export default function ChatDashboard() {
     }
   };
 
+  const deleteSession = async (sessionId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    try {
+      const res = await fetch(`/api/v1/sessions/${sessionId}`, {
+        method: "DELETE",
+      });
+      if (res.ok) {
+        setSessions(prev => prev.filter(s => s.id !== sessionId));
+        if (activeSession === sessionId) {
+          setActiveSession(null);
+        }
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
   const sendMessage = async (e: FormEvent) => {
     e.preventDefault();
     if (!inputValue.trim() || isLoading) return;
 
     let targetSessionId = activeSession;
-    
+
     // Create new session automatically if none exists
     if (!targetSessionId) {
       try {
@@ -161,12 +178,18 @@ export default function ChatDashboard() {
     }
   };
 
-  const openPdf = (source: string, page: number) => {
+  const openPdf = (source: string, page: number, snippet?: string) => {
     // Strip absolute paths for legacy or un-processed absolute DB documents
     const filename = source.split(/[/\\]/).pop() || source;
     // Determine the host for API proxying or Next rewrite
     const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-    setViewingPdf(`${apiUrl}/api/v1/docs/${filename}#page=${page}`);
+
+    let hashParams = `page=${page}`;
+    if (snippet) {
+      hashParams += `&search=${encodeURIComponent(snippet.substring(0, 40))}`;
+    }
+
+    setViewingPdf(`${apiUrl}/api/v1/docs/${filename}#${hashParams}`);
   };
 
   if (status === "loading") {
@@ -195,14 +218,21 @@ export default function ChatDashboard() {
             <button
               key={sess.id}
               onClick={() => setActiveSession(sess.id)}
-              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left truncate text-sm transition-colors ${
-                activeSession === sess.id
-                  ? "bg-zinc-800 text-zinc-100"
-                  : "text-zinc-400 hover:bg-zinc-800/50 hover:text-zinc-200"
-              }`}
+              className={`group w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-left truncate text-sm transition-colors ${activeSession === sess.id
+                ? "bg-zinc-800 text-zinc-100"
+                : "text-zinc-400 hover:bg-zinc-800/50 hover:text-zinc-200"
+                }`}
             >
-              <MessageSquare size={16} className="flex-shrink-0" />
-              <span className="truncate">{sess.title}</span>
+              <div className="flex items-center gap-3 truncate">
+                <MessageSquare size={16} className="flex-shrink-0" />
+                <span className="truncate">{sess.title}</span>
+              </div>
+              <div
+                onClick={(e) => deleteSession(sess.id, e)}
+                className="opacity-0 group-hover:opacity-100 p-1 hover:text-red-400 transition-opacity"
+              >
+                <Trash2 size={14} />
+              </div>
             </button>
           ))}
           {sessions.length === 0 && (
@@ -244,9 +274,9 @@ export default function ChatDashboard() {
         </header>
 
         {/* Message List */}
-        <div className="flex-1 overflow-y-auto p-4 md:p-6 lg:p-8 space-y-8 pb-32">
+        <div className="flex-1 overflow-y-auto p-4 md:p-6 lg:p-8 space-y-8">
           {(!messages || messages.length === 0) ? (
-            <div className="h-full flex flex-col items-center justify-center text-center px-4 max-w-lg mx-auto">
+            <div className="h-full flex flex-col items-center justify-center text-center px-4 max-w-lg mx-auto pb-32">
               <div className="w-16 h-16 bg-zinc-900 rounded-2xl flex items-center justify-center mb-6 border border-zinc-800/50 shadow-sm">
                 <Bot size={32} className="text-indigo-400" />
               </div>
@@ -270,7 +300,7 @@ export default function ChatDashboard() {
                       </div>
                     )}
                   </div>
-                  
+
                   <div className="flex-1 min-w-0">
                     <div className="font-medium text-sm text-zinc-400 mb-1 flex items-center">
                       {msg.role === "assistant" ? "Adaptive RAG" : "You"}
@@ -286,7 +316,7 @@ export default function ChatDashboard() {
                         {msg.references.map((ref, rIdx) => (
                           <button
                             key={rIdx}
-                            onClick={() => openPdf(ref.source, ref.page)}
+                            onClick={() => openPdf(ref.source, ref.page, ref.snippet)}
                             className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-zinc-900 border border-zinc-800 rounded-md text-xs font-medium text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 transition-colors shadow-sm"
                             title={ref.snippet}
                           >
@@ -301,7 +331,7 @@ export default function ChatDashboard() {
               </div>
             ))
           )}
-          
+
           {isLoading && (
             <div className="flex flex-col max-w-4xl mx-auto">
               <div className="flex items-start gap-4">
@@ -318,6 +348,8 @@ export default function ChatDashboard() {
               </div>
             </div>
           )}
+
+          <div className="h-32 md:h-40 flex-shrink-0 w-full" />
           <div ref={messagesEndRef} />
         </div>
 
@@ -363,7 +395,7 @@ export default function ChatDashboard() {
               <FileText size={16} className="text-indigo-400" />
               <span className="truncate">{viewingPdf.split('/').pop()?.split('#')[0]}</span>
             </div>
-            <button 
+            <button
               onClick={() => setViewingPdf(null)}
               className="p-1.5 text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 rounded-md transition-colors"
             >
@@ -371,8 +403,8 @@ export default function ChatDashboard() {
             </button>
           </div>
           <div className="flex-1 bg-[#525659] relative w-full h-full">
-            <iframe 
-              src={viewingPdf} 
+            <iframe
+              src={viewingPdf}
               className="w-full h-full border-none absolute inset-0"
               title="PDF Viewer"
             ></iframe>

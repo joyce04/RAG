@@ -111,6 +111,16 @@ def get_messages(session_id: str, current_user: models.User = Depends(get_curren
         raise HTTPException(status_code=404, detail="Session not found")
     return sess.messages
 
+@api_router.delete("/sessions/{session_id}")
+def delete_session(session_id: str, current_user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
+    sess = db.query(models.Session).filter(models.Session.id == session_id, models.Session.user_id == current_user.id).first()
+    if not sess:
+        raise HTTPException(status_code=404, detail="Session not found")
+    
+    db.delete(sess)
+    db.commit()
+    return {"status": "ok"}
+
 class ChatRequest(BaseModel):
     session_id: str
     question: str
@@ -126,10 +136,15 @@ def chat_request(req: ChatRequest, current_user: models.User = Depends(get_curre
     db.add(user_msg)
     db.commit()
 
+    # Fetch Chat History for Context
+    past_messages = db.query(models.Message).filter(models.Message.session_id == sess.id).order_by(models.Message.created_at.asc()).all()
+    # We slice to grab the last ~6 interactions avoiding token bloat
+    chat_history = [{"role": msg.role, "content": msg.content} for msg in past_messages[-6:]] if past_messages else []
+
     # Call LangGraph
     from graph.graph import app as graph_app
     print(f"Invoking graph with question: {req.question}")
-    result = graph_app.invoke({'question': req.question})
+    result = graph_app.invoke({'question': req.question, 'chat_history': chat_history})
     
     answer_text = result.get('generation', "Sorry, I couldn't generate an answer.")
     references = result.get('references', [])
