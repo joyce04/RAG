@@ -6,7 +6,7 @@ from pathlib import Path
 import fire
 
 from dotenv import load_dotenv
-from langchain_text_splitters import MarkdownHeaderTextSplitter #RecursiveCharacterTextSplitter
+from langchain_text_splitters import MarkdownHeaderTextSplitter, RecursiveCharacterTextSplitter
 from langchain_chroma import Chroma
 from langchain_community.document_loaders import PyPDFDirectoryLoader #WebBaseLoader
 from langchain_openai import OpenAIEmbeddings
@@ -234,38 +234,60 @@ def ingest(
     table_docs = [d for d in docs if d.metadata.get("content_type") == "table"]
     text_docs = [d for d in docs if d.metadata.get("content_type") != "table"]
 
-    # 3. Stitch text pages by source file (for PyPDF / LlamaParse)
-    pdf_texts: dict[str, str] = {}
+    # 3. Stitch text pages by source file, embedding [PAGE:N] markers to preserve page info
+    pdf_pages: dict[str, list[tuple[int, str]]] = {}
     for doc in text_docs:
         source = doc.metadata["source"]
-        if source not in pdf_texts:
-            pdf_texts[source] = ""
-        pdf_texts[source] += doc.page_content + " "
+        page_num = doc.metadata.get("page", 0)
+        page_num = (page_num + 1) if isinstance(page_num, int) else 1
+        if source not in pdf_pages:
+            pdf_pages[source] = []
+        pdf_pages[source].append((page_num, doc.page_content))
 
-    stitched_docs = [
-        Document(page_content=text, metadata={"source": source, "content_type": "text"})
-        for source, text in pdf_texts.items()
-    ]
+    stitched_docs = []
+    for source, pages in pdf_pages.items():
+        pages.sort(key=lambda x: x[0])
+        stitched = "\n".join(f"[PAGE:{p}]\n{content}" for p, content in pages)
+        stitched_docs.append(
+            Document(page_content=stitched, metadata={"source": source, "content_type": "text"})
+        )
 
-    # 4. Split text chunks
-    # text_splitter = RecursiveCharacterTextSplitter(
-    #     chunk_size=500,
-    #     chunk_overlap=100,
-    # )
-    # text_splits = text_splitter.split_documents(stitched_docs)
+    # 4. Split: MarkdownHeaderTextSplitter (primary) → RecursiveCharacterTextSplitter (secondary)
+    #    Page numbers are propagated from [PAGE:N] markers embedded in the stitched text.
     headers_to_split_on = [
         ("#", "Header 1"),
         ("##", "Header 2"),
         ("###", "Header 3"),
     ]
     markdown_splitter = MarkdownHeaderTextSplitter(headers_to_split_on=headers_to_split_on)
-    
+    char_splitter = RecursiveCharacterTextSplitter(
+        chunk_size=1000,
+        chunk_overlap=150,
+        separators=["\n\n", "\n", " ", ""],
+    )
+    _page_marker = re.compile(r'\[PAGE:(\d+)\]')
+
     text_splits = []
     for doc in stitched_docs:
-        md_header_splits = markdown_splitter.split_text(doc.page_content)
-        for split in md_header_splits:
-            split.metadata.update(doc.metadata)
-        text_splits.extend(md_header_splits)
+        # Primary split by markdown headers (preserves [PAGE:N] markers in text)
+        md_splits = markdown_splitter.split_text(doc.page_content)
+
+        # Secondary split by character count for large chunks (e.g. PDFs without headers)
+        sub_chunks: list[Document] = []
+        for md_split in md_splits:
+            md_split.metadata.update(doc.metadata)
+            sub_chunks.extend(char_splitter.split_documents([md_split]))
+
+        # Propagate page numbers: carry the last seen [PAGE:N] marker forward
+        current_page = 1
+        for chunk in sub_chunks:
+            markers = _page_marker.findall(chunk.page_content)
+            if markers:
+                current_page = int(markers[0])
+            chunk.metadata["page"] = current_page
+            chunk.page_content = _page_marker.sub("", chunk.page_content).strip()
+
+        text_splits.extend(sub_chunks)
 
     # 5. Combine: split text + whole tables
     all_chunks = text_splits + table_docs

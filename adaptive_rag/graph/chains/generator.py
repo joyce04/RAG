@@ -17,10 +17,10 @@ prompt = ChatPromptTemplate.from_messages([
      "2. 관련 판례명, 의결 번호, 날짜 등을 가능한 한 인용하세요.\n"
      "3. 문서에 답변 근거가 없으면 '제공된 문서에서 관련 정보를 찾을 수 없습니다'라고 답하세요.\n"
      "4. 답변은 명확하고 구조적으로 작성하세요.\n"
-     "5. references의 source는 반드시 문서 앞에 표시된 [출처: 파일명] 에서 파일명을 그대로 복사하세요. 절대 임의로 파일명을 만들지 마세요.\n\n"
+     "5. references에는 답변의 근거가 된 문서의 번호([문서 N]에서 N)와 해당 문장을 그대로 인용하세요. 문서 번호 외의 값은 절대 만들지 마세요.\n\n"
      "이전 대화 기록 (Chat History):\n{chat_history}"),
     ("human",
-     "문서:\n{context}\n\n"
+     "문서 목록 (번호가 매겨진 문서만 인용 가능):\n{context}\n\n"
      "질문: {question}"),
 ])
 
@@ -28,9 +28,8 @@ from pydantic import BaseModel, Field
 from typing import List
 
 class Reference(BaseModel):
-    source: str = Field(description="The source file name, eg 'case_1.pdf'")
-    page: int = Field(description="The matching page number.")
-    snippet: str = Field(description="A short quote from the document.")
+    source_index: int = Field(description="The integer document number from the [문서 N] tag (e.g. 1, 2, 3). Must be one of the provided document numbers.")
+    snippet: str = Field(description="A short verbatim quote from the document supporting the answer.")
 
 class GenerationOutput(BaseModel):
     answer: str = Field(description="The generated answer in Markdown.")

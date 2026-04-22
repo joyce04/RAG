@@ -1,5 +1,4 @@
 import os
-import difflib
 import logging
 import unicodedata
 from typing import Any, Dict, List
@@ -16,51 +15,23 @@ def _nfc(s: str) -> str:
     return unicodedata.normalize('NFC', s)
 
 
-def _format_context(documents: List[Document]) -> str:
-    """Format documents with their actual filename so the LLM can cite them correctly."""
+def _format_context(documents: List[Document], index_map: dict) -> str:
+    """
+    Format documents with [문서 N] indices.
+    Populates index_map: {N: {"source": filename, "page": page_num}}
+    so the LLM only needs to cite the index number.
+    """
     parts = []
-    for doc in documents:
+    for i, doc in enumerate(documents):
+        idx = i + 1
         raw_source = doc.metadata.get('source', '') if isinstance(doc, Document) else ''
-        if not raw_source:
-            parts.append(doc.page_content if isinstance(doc, Document) else str(doc))
-            continue
-        # Show NFC filename so LLM can copy it exactly
-        filename = _nfc(os.path.basename(raw_source))
-        parts.append(f"[출처: {filename}]\n{doc.page_content}")
+        filename = _nfc(os.path.basename(raw_source)) if raw_source else ''
+        page = doc.metadata.get('page', 1) if isinstance(doc, Document) else 1
+        index_map[idx] = {"source": filename, "page": page}
+        content = doc.page_content if isinstance(doc, Document) else str(doc)
+        header = f"[문서 {idx}]" if filename else f"[문서 {idx}]"
+        parts.append(f"{header}\n{content}")
     return "\n\n---\n\n".join(parts)
-
-
-def _build_source_map(documents: List[Document]) -> dict:
-    """Return {nfc_filename: original_filename} for all retrieved docs."""
-    mapping = {}
-    for doc in documents:
-        if not isinstance(doc, Document):
-            continue
-        raw_source = doc.metadata.get('source', '')
-        if not raw_source:
-            continue
-        original = os.path.basename(raw_source)
-        mapping[_nfc(original)] = original
-    return mapping
-
-
-def _resolve_filename(llm_filename: str, source_map: dict) -> str | None:
-    """Map an LLM-generated filename (NFC) to the actual original filename."""
-    name = _nfc(os.path.basename(llm_filename))
-    # Exact match after NFC normalization
-    if name in source_map:
-        return source_map[name]
-    # Stem-based partial match
-    stem = os.path.splitext(name)[0]
-    for nfc_key, original in source_map.items():
-        nfc_stem = os.path.splitext(nfc_key)[0]
-        if stem in nfc_stem or nfc_stem in stem:
-            return original
-    # Fuzzy match as last resort
-    matches = difflib.get_close_matches(name, list(source_map.keys()), n=1, cutoff=0.4)
-    if matches:
-        return source_map[matches[0]]
-    return None
 
 
 def generate(state: GraphState) -> Dict[str, Any]:
@@ -70,8 +41,8 @@ def generate(state: GraphState) -> Dict[str, Any]:
     documents = state['documents']
     chat_history = state.get('chat_history', [])
 
-    formatted_context = _format_context(documents)
-    source_map = _build_source_map(documents)
+    index_map: dict = {}
+    formatted_context = _format_context(documents, index_map)
 
     generation_obj = generation_chain.invoke({
         'context': formatted_context,
@@ -82,17 +53,22 @@ def generate(state: GraphState) -> Dict[str, Any]:
     retry_count = state.get('retry_count', 0) + 1
 
     raw_refs = generation_obj.references if hasattr(generation_obj, 'references') else []
-    seen = set()
+    seen: set = set()
     unique_refs = []
     for ref in raw_refs:
-        filename = _resolve_filename(ref.source, source_map)
-        if not filename:
-            logger.warning("Could not resolve reference source '%s' — skipping", ref.source)
+        idx = getattr(ref, 'source_index', None)
+        doc_info = index_map.get(idx)
+        if not doc_info or not doc_info.get('source'):
+            logger.warning("Invalid source_index %s — skipping", idx)
             continue
-        key = (filename, ref.page)
+        key = (doc_info['source'], doc_info['page'])
         if key not in seen:
             seen.add(key)
-            unique_refs.append({"source": filename, "page": ref.page, "snippet": ref.snippet})
+            unique_refs.append({
+                "source": doc_info['source'],
+                "page": doc_info['page'],
+                "snippet": ref.snippet,
+            })
 
     return {
         'question': question,
