@@ -5,7 +5,9 @@
 The web UI provides a chat interface for querying Korean competition law cases with RAG system. Each answer cites its source documents as reference chips below the response; clicking a chip opens the original PDF in the right-hand document viewer.
 
 Self-reflection for RAG is the system that reviews its own answers and decides whether to retrieve more relevant data or not.[1]
+
 Corrective RAG is a RAG system that corrects the retrieved documents before answering.[2]
+
 Adaptive RAG is a system that decides whether, when and how much to retrieve external information based on the input query.[3]
 
 ## Architecture
