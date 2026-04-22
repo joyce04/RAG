@@ -15,7 +15,7 @@ def generate(state: GraphState) -> Dict[str, Any]:
     question = state['question']
     documents = state['documents']
 
-    generation = generation_chain.invoke({
+    generation_obj = generation_chain.invoke({
         'context': documents,
         'question': question
     })
@@ -25,6 +25,7 @@ def generate(state: GraphState) -> Dict[str, Any]:
     return {
         'question': question,
         'documents': documents,
-        'generation': generation,
+        'generation': generation_obj.answer if hasattr(generation_obj, 'answer') else str(generation_obj),
+        'references': [dict(ref.dict(), source=__import__('os').path.basename(ref.source)) for ref in generation_obj.references] if hasattr(generation_obj, 'references') else [],
         'retry_count': retry_count,
     }

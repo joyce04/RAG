@@ -10,5 +10,6 @@ class GraphState(TypedDict):
     question: str
     documents: List[Document]
     generation: str
+    references: list
     web_search: bool
     retry_count: int  # number of generation attempts; caps at MAX_RETRIES in graph.py

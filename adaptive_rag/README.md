@@ -45,6 +45,12 @@ OPENROUTER_MODEL=openai/gpt-4o-mini
 # Required only for LlamaParse ingestion
 LLAMA_CLOUD_API_KEY=your_llama_cloud_key_here
 
+# NextAuth variables required for UI Login
+NEXTAUTH_SECRET=your_random_secret_string
+NEXT_PUBLIC_API_URL=http://localhost:8000
+GOOGLE_CLIENT_ID=your_google_client_id
+GOOGLE_CLIENT_SECRET=your_google_client_secret
+
 # Optional: LangSmith tracing
 LANGCHAIN_TRACING_V2=true
 LANGCHAIN_API_KEY=your_langsmith_key_here
@@ -81,10 +87,47 @@ For LlamaParse, results are cached per-file — rerun to resume where you left o
 
 See [preprocessing.md](data/preprocessing.md) for details on all preprocessing steps applied.
 
-## Step 4: Execute the Graph
+## Step 4: Run the Application
+
+There are two ways to run the application depending on your environment. 
+
+### Method A: Local Development (Without Docker)
+Since you may not have Docker installed on your personal Mac, you can run the services natively using node and python:
+
+**1. Start the Backend:**
+```bash
+# From the root adaptive_rag directory
+uv run uvicorn main:app --port 8000
+```
+
+**2. Start the Frontend:**
+Open a new terminal window:
+```bash
+cd frontend
+npm run dev
+```
+Navigate to `http://localhost:3000`.
+
+### Method B: Cloud Server Deployment (With Docker)
+If you are deploying this repository to your new cloud server, make sure Docker is installed there. You can start the containerized system via:
 
 ```bash
-uv run python main.py
+docker compose build
+docker compose up -d
+```
+
+# Generate random string
+```python
+import secrets
+import string
+
+# Define the pool of characters (letters and digits)
+alphabet = string.ascii_letters + string.digits
+
+# Generate a 30-character string
+random_string = ''.join(secrets.choice(alphabet) for _ in range(30))
+
+print(random_string)
 ```
 
 ## References

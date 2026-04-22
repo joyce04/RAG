@@ -22,7 +22,19 @@ prompt = ChatPromptTemplate.from_messages([
      "질문: {question}"),
 ])
 
+from pydantic import BaseModel, Field
+from typing import List
+
+class Reference(BaseModel):
+    source: str = Field(description="The source file name, eg 'case_1.pdf'")
+    page: int = Field(description="The matching page number.")
+    snippet: str = Field(description="A short quote from the document.")
+
+class GenerationOutput(BaseModel):
+    answer: str = Field(description="The generated answer in Markdown.")
+    references: List[Reference] = Field(description="List of cited documents.", default_factory=list)
+
 # ── LCEL chain ─────────────────────────────────────────────────────────────
 # Input: {"context": <docs>, "question": <str>}
-# Output: plain string answer
-generation_chain = prompt | default_llm | StrOutputParser()
+# Output: GenerationOutput
+generation_chain = prompt | default_llm.with_structured_output(GenerationOutput)
