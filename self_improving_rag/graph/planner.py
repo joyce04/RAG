@@ -21,7 +21,7 @@ def make_planner_node(llms: dict) -> Callable[[TeamState], dict]:
 
     The returned node:
       1. Reads the planner prompt from the active SOP.
-      2. Calls the `planner` LLM in JSON mode (llama3.1:8b-instruct).
+      2. Calls the `planner` LLM in JSON mode (llama3.1:8b).
       3. Writes the resulting plan dict back into state.
     """
     planner_llm = llms['planner']

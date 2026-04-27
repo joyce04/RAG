@@ -26,8 +26,39 @@ Each evaluator returns a GradedScore(score: float, reasoning: str).
 
 from pydantic import BaseModel, Field
 from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.output_parsers import StrOutputParser
 
 from graph.states import TeamState, AgentOutput
+
+
+def _invoke_structured(llm, prompt, schema, inputs: dict):
+    """
+    Call `llm` (ChatOllama with format='json') via `prompt`, parse the
+    JSON string output, and validate it into `schema` (a Pydantic model).
+
+    ChatOllama from langchain_community does not implement
+    with_structured_output, so we handle parsing explicitly here.
+
+    A format instruction is appended as a final system message so the
+    model knows exactly which field names to use — without this the model
+    tends to invent its own key names (e.g. 'evaluation' instead of 'score').
+    """
+    # Build the required-fields hint from the Pydantic schema
+    props = schema.model_json_schema().get('properties', {})
+    fields_str = ", ".join(f'"{k}"' for k in props.keys())
+    format_instruction = (
+        "system",
+        f"You MUST respond with a valid JSON object. "
+        f"Required keys: {fields_str}. No other keys, no markdown, no explanation.",
+    )
+
+    # Append the format instruction to the existing prompt messages
+    augmented_prompt = ChatPromptTemplate.from_messages(
+        list(prompt.messages) + [format_instruction]
+    )
+
+    chain = augmented_prompt | llm | StrOutputParser()
+    return schema.model_validate_json(chain.invoke(inputs))
 
 
 # ---------------------------------------------------------------------------
@@ -51,7 +82,6 @@ def scientific_rigor_evaluator(
     Score how well the criteria align with the retrieved scientific literature.
     1.0 = perfectly grounded; 0.0 = contradicts or ignores the literature.
     """
-    evaluator_llm = llms['director'].with_structured_output(GradedScore)
     prompt = ChatPromptTemplate.from_messages([
         (
             "system",
@@ -65,14 +95,14 @@ def scientific_rigor_evaluator(
             "**Supporting Scientific Context:**\n{context}",
         ),
     ])
-    return (prompt | evaluator_llm).invoke({"criteria": generated_criteria, "context": pubmed_context})
+    return _invoke_structured(llms['director'], prompt, GradedScore,
+                              {"criteria": generated_criteria, "context": pubmed_context})
 
 
 def regulatory_compliance_evaluator(
     generated_criteria: str, fda_context: str, llms: dict
 ) -> GradedScore:
     """Score adherence to the retrieved FDA guidelines. 1.0 = full compliance."""
-    evaluator_llm = llms['director'].with_structured_output(GradedScore)
     prompt = ChatPromptTemplate.from_messages([
         (
             "system",
@@ -86,7 +116,8 @@ def regulatory_compliance_evaluator(
             "**Applicable FDA Guidelines:**\n{context}",
         ),
     ])
-    return (prompt | evaluator_llm).invoke({"criteria": generated_criteria, "context": fda_context})
+    return _invoke_structured(llms['director'], prompt, GradedScore,
+                              {"criteria": generated_criteria, "context": fda_context})
 
 
 def ethical_soundness_evaluator(
@@ -96,7 +127,6 @@ def ethical_soundness_evaluator(
     Score ethical quality based on Belmont Report principles.
     1.0 = strong respect for autonomy, beneficence, and justice.
     """
-    evaluator_llm = llms['director'].with_structured_output(GradedScore)
     prompt = ChatPromptTemplate.from_messages([
         (
             "system",
@@ -110,7 +140,8 @@ def ethical_soundness_evaluator(
             "**Ethical Principles:**\n{context}",
         ),
     ])
-    return (prompt | evaluator_llm).invoke({"criteria": generated_criteria, "context": ethics_context})
+    return _invoke_structured(llms['director'], prompt, GradedScore,
+                              {"criteria": generated_criteria, "context": ethics_context})
 
 
 # ---------------------------------------------------------------------------

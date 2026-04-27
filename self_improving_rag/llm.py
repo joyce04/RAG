@@ -7,10 +7,10 @@ All models run locally via Ollama. `get_llms()` is cached so the
 connections are created only once per process.
 
 Model roles:
-  planner       - structured JSON planning (llama3.1:8b-instruct)
+  planner       - structured JSON planning (llama3.1:8b)
   drafter       - free-form text generation (qwen2:7b)
   sql_coder     - SQL generation against DuckDB (qwen2:7b)
-  director      - high-level evaluation / orchestration (llama3:70b)
+  director      - high-level evaluation / orchestration qwen2.5:14b #(llama3:70b)
   embedding_model - dense embeddings for FAISS (nomic-embed-text)
 
 Alternative models (swap by changing the string below):
@@ -31,9 +31,9 @@ from langchain_community.embeddings import OllamaEmbeddings
 def get_llms() -> dict:
     """Return a dict of all configured LLM / embedding clients."""
     return {
-        "planner":         ChatOllama(model="llama3.1:8b-instruct", temperature=0.0, format="json"),
+        "planner":         ChatOllama(model="llama3.1:8b", temperature=0.0, format="json"),
         "drafter":         ChatOllama(model="qwen2:7b",              temperature=0.2),
         "sql_coder":       ChatOllama(model="qwen2:7b",              temperature=0.0),
-        "director":        ChatOllama(model="llama3:70b",             temperature=0.0, format="json"),
+        "director":        ChatOllama(model="qwen2.5:14b",             temperature=0.0, format="json"), #"llama3:70b"
         "embedding_model": OllamaEmbeddings(model="nomic-embed-text"),
     }

@@ -74,7 +74,6 @@ def visualize_frontier(pareto_sops: list) -> None:
         'SOP Version',
         colormap=plt.get_cmap("viridis"),
         ax=ax2,
-        axvlines_kwargs={"linewidth": 1, "color": "grey"},
     )
 
     ax2.set_title('5D Performance Trade-offs on Pareto Front', fontsize=14)

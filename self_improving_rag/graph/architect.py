@@ -9,10 +9,14 @@ The mutations are diverse: different prompts, toggled agents, tuned k, or
 alternative synthesizer models.
 """
 
+import json
 from typing import List
 
 from pydantic import BaseModel
+from langchain_core.messages import SystemMessage
 from langchain_core.prompts import ChatPromptTemplate
+
+from graph.evaluator import _invoke_structured
 
 from graph.teamsop import TeamSOP
 from graph.diagnostician import Diagnosis
@@ -38,28 +42,28 @@ def sop_architect(diagnosis: Diagnosis, current_sop: TeamSOP, llms: dict) -> Evo
     """
     print("--- EXECUTING SOP ARCHITECT ---")
 
-    architect_llm = llms['director'].with_structured_output(EvolvedSOPs)
-
+    schema_json = json.dumps(TeamSOP.model_json_schema(), indent=2)
+    system_text = (
+        "You are an AI process architect. Your job is to modify a process "
+        "configuration (an SOP) to fix a diagnosed performance problem.\n\n"
+        f"The SOP schema is:\n{schema_json}\n\n"
+        "Return a JSON object with a single key 'mutations' containing a list "
+        "of 2-3 new, valid SOP objects. Propose diverse and creative mutations: "
+        "you may change prompts, toggle agents, adjust retrieval k, or change "
+        "the synthesizer model. Only modify fields relevant to the diagnosis."
+    )
     prompt = ChatPromptTemplate.from_messages([
-        (
-            "system",
-            f"You are an AI process architect. Your job is to modify a process "
-            f"configuration (an SOP) to fix a diagnosed performance problem.\n\n"
-            f"The SOP schema is:\n{TeamSOP.model_json_schema()}\n\n"
-            f"Return a JSON object with a single key 'mutations' containing a list "
-            f"of 2–3 new, valid SOP objects. Propose diverse and creative mutations: "
-            f"you may change prompts, toggle agents, adjust retrieval k, or change "
-            f"the synthesizer model. Only modify fields relevant to the diagnosis.",
-        ),
+        SystemMessage(content=system_text),
         (
             "human",
             "Current SOP:\n{current_sop}\n\n"
             "Performance diagnosis:\n{diagnosis}\n\n"
-            "Generate 2–3 improved SOPs.",
+            "Generate 2-3 improved SOPs.",
         ),
     ])
 
-    return (prompt | architect_llm).invoke({
+    # _invoke_structured handles JSON parsing + field-name enforcement.
+    return _invoke_structured(llms['director'], prompt, EvolvedSOPs, {
         "current_sop": current_sop.model_dump_json(),
         "diagnosis":   diagnosis.model_dump_json(),
     })

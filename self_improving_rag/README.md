@@ -48,11 +48,11 @@ planner → execute_specialists → synthesizer → END
 
 | Node | Model | Role |
 |---|---|---|
-| Planner | `llama3.1:8b-instruct` (JSON mode) | Decomposes trial concept into specialist sub-tasks |
+| Planner | `llama3.1:8` (JSON mode) | Decomposes trial concept into specialist sub-tasks |
 | Retrieval agents | — | FAISS retrieval per specialist (Regulatory / Medical / Ethics) |
 | Patient Cohort Analyst | `qwen2:7b` | Generates + executes DuckDB SQL to count eligible patients |
 | Synthesizer | `qwen2:7b` (configurable) | Writes formal Inclusion/Exclusion Criteria document |
-| Evaluator | `llama3:70b` (LLM-as-judge) | Scores output on 5 dimensions |
+| Evaluator | `qwen2.5:14b` #`llama3:70b` (LLM-as-judge) | Scores output on 5 dimensions |
 | Diagnostician | `llama3:70b` | Identifies the weakest dimension |
 | SOP Architect | `llama3:70b` | Proposes 2–3 mutated SOP configurations |
 
@@ -96,9 +96,9 @@ planner → execute_specialists → synthesizer → END
 
 - [Ollama](https://ollama.com/) running locally with these models pulled:
   ```bash
-  ollama pull llama3.1:8b-instruct
+  ollama pull llama3.1:8b
   ollama pull qwen2:7b
-  ollama pull llama3:70b
+  ollama pull qwen2.5:14b #llama3:70b
   ollama pull nomic-embed-text
   ```
 - MIMIC-III CSV files (gzipped) placed in `data/mimic/`:

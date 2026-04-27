@@ -12,6 +12,9 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.output_parsers import StrOutputParser
+
+from graph.evaluator import _invoke_structured
 
 from graph.evaluator import EvaluationResult
 
@@ -42,8 +45,6 @@ def performance_diagnostician(eval_result: EvaluationResult, llms: dict) -> Diag
     """
     print("--- EXECUTING PERFORMANCE DIAGNOSTICIAN ---")
 
-    diagnostician_llm = llms['director'].with_structured_output(Diagnosis)
-
     prompt = ChatPromptTemplate.from_messages([
         (
             "system",
@@ -58,5 +59,7 @@ def performance_diagnostician(eval_result: EvaluationResult, llms: dict) -> Diag
         ),
     ])
 
-    # Serialise the evaluation result to JSON so the LLM sees all scores
-    return (prompt | diagnostician_llm).invoke({"report": eval_result.model_dump_json()})
+    # Serialise the evaluation result to JSON so the LLM sees all scores.
+    # _invoke_structured handles JSON parsing + field-name enforcement.
+    return _invoke_structured(llms['director'], prompt, Diagnosis,
+                              {"report": eval_result.model_dump_json()})

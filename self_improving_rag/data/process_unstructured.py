@@ -13,7 +13,7 @@ called by main.py after data ingestion is complete.
 import os
 
 from langchain_community.document_loaders import DirectoryLoader, TextLoader  # 'loaders' (plural)
-from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import FAISS
 
 from data.download_raw_data import data_paths
