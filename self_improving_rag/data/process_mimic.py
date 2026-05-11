@@ -79,7 +79,7 @@ def load_real_mimic_data() -> str | None:
 
     con.execute(
         f"CREATE TABLE prescriptions AS "
-        f"SELECT SUBJECT_ID, DRUG "
+        f"SELECT SUBJECT_ID, HADM_ID, DRUG, DRUG_NAME_POE, DRUG_NAME_GENERIC, DRUG_TYPE "
         f"FROM read_csv_auto('{required_files['prescriptions']}')"
     )
 

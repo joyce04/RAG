@@ -13,7 +13,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 
 
-def visualize_frontier(pareto_sops: list) -> None:
+def visualize_frontier(pareto_sops: list, return_figure: bool = False):
     """
     Render a Rigor-vs-Feasibility scatter and a 5D parallel-coordinates
     plot for the SOPs on the Pareto front.
@@ -31,8 +31,8 @@ def visualize_frontier(pareto_sops: list) -> None:
     # 1. 2D scatter: Rigor vs Feasibility
     # ------------------------------------------------------------------
     labels            = [f"v{s['version']}" for s in pareto_sops]
-    rigor_scores      = [s['evaluation'].rigor.score       for s in pareto_sops]
-    feasibility_scores= [s['evaluation'].feasibility.score for s in pareto_sops]
+    rigor_scores      = [s['evaluation'].accuracy.score  for s in pareto_sops]
+    feasibility_scores= [s['evaluation'].grounding.score for s in pareto_sops]
 
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 6))
 
@@ -82,4 +82,7 @@ def visualize_frontier(pareto_sops: list) -> None:
     ax2.legend(loc='upper right')
 
     plt.tight_layout()
+    if return_figure:
+        return fig
     plt.show()
+    return None

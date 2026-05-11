@@ -18,7 +18,7 @@ from langchain_core.prompts import ChatPromptTemplate
 
 from graph.evaluator import _invoke_structured
 
-from graph.teamsop import TeamSOP
+from graph.drugsop import DrugSOP as TeamSOP
 from graph.diagnostician import Diagnosis
 
 

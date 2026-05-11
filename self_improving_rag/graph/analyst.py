@@ -1,16 +1,22 @@
 """
 analyst.py
 ----------
-The Patient Cohort Analyst agent.
+Two SQL analyst agents for the Drug Relationship RAG system:
 
-Uses the `sql_coder` LLM to generate a DuckDB SQL query that estimates
-how many real patients in the MIMIC-III database would qualify for the
-trial criteria, providing a programmatic feasibility signal.
+  MIMIC Prescribing Analyst
+    Queries MIMIC-III PRESCRIPTIONS to surface real-world co-prescription
+    frequency and concurrent DDI pair counts, grounding the report in
+    actual ICU prescribing practice.
 
-Uses a factory pattern so `knowledge_stores` and `llms` are injected
-rather than accessed as globals.
+  Interaction DB Analyst
+    Queries the DrugBank/DDI DuckDB to count known interactions for the
+    drug — used by interaction_completeness_evaluator for scoring.
+
+Both are returned by make_analyst() as a single callable that dispatches
+on an `analyst_type` parameter.
 """
 
+import re
 import duckdb
 from typing import Callable
 
@@ -22,94 +28,199 @@ from graph.states import TeamState, AgentOutput
 
 def make_analyst(knowledge_stores: dict, llms: dict) -> Callable:
     """
-    Factory that binds `knowledge_stores` (for the DB path) and `llms`
-    (for the sql_coder model), and returns a patient_cohort_analyst
-    function with signature:
+    Factory that binds knowledge_stores and llms, returning a callable:
 
-        patient_cohort_analyst(task_description, state) -> AgentOutput
+        analyst(task_description, state, analyst_type) -> AgentOutput
+
+    analyst_type:
+      "mimic"          → MIMIC PRESCRIPTIONS queries
+      "interaction_db" → DrugBank/DDI DuckDB count query
+      (default)        → falls back to mimic
     """
     sql_coder_llm = llms['sql_coder']
 
-    def patient_cohort_analyst(task_description: str, state: TeamState) -> AgentOutput:
-        """
-        Estimate the number of eligible patients for the described criteria.
+    def analyst(
+        task_description: str,
+        state: TeamState,
+        analyst_type: str = "mimic",
+    ) -> AgentOutput:
 
-        Steps:
-          1. If the SOP disables the SQL analyst, return a skipped notice.
-          2. Read the DB schema to give the LLM accurate column names.
-          3. Generate a COUNT(*) SQL query via the sql_coder LLM.
-          4. Execute the query against DuckDB and return the count.
+        if analyst_type == "interaction_db":
+            return _run_interaction_db_analyst(task_description, state, knowledge_stores)
+        else:
+            return _run_mimic_analyst(task_description, state, knowledge_stores, sql_coder_llm)
 
-        Key MIMIC item IDs used:
-          50912 = creatinine  (ITEMID proxy for renal impairment: 1.5–3.0)
-          50852 = HbA1c       (ITEMID proxy for uncontrolled T2DM: > 8.0)
-          ICD9  = '25000'     (Type 2 Diabetes Mellitus)
-        """
-        if not state['sop'].use_sql_analyst:
-            return AgentOutput(
-                agent_name="Patient Cohort Analyst",
-                findings="Analysis skipped as per SOP.",
-            )
+    return analyst
 
-        db_path = knowledge_stores['mimic_db_path']
 
-        # Step 1: pull the schema so the LLM knows exact column names
-        con = duckdb.connect(db_path)
-        schema = con.execute("""
-            SELECT table_name, column_name, data_type
-            FROM information_schema.columns
-            WHERE table_schema = 'main'
-            ORDER BY table_name, column_name
-        """).df()
+# ---------------------------------------------------------------------------
+# MIMIC Prescribing Analyst
+# ---------------------------------------------------------------------------
+
+def _run_mimic_analyst(
+    task_description: str,
+    state: TeamState,
+    knowledge_stores: dict,
+    sql_coder_llm,
+) -> AgentOutput:
+    """
+    Query MIMIC-III PRESCRIPTIONS to find:
+      1. How many admissions included this drug.
+      2. Top-K most frequent co-prescriptions.
+      3. How many admissions had the drug co-prescribed with each
+         co-prescription (concurrent DDI pair counts).
+
+    Output format (parsed by real_world_grounding_evaluator):
+      "In MIMIC-III, {drug} was prescribed in {N} admissions.
+       Top co-prescriptions: {drug1} ({n1}), {drug2} ({n2}), ...
+       Notable DDI pairs observed in database: {N_ddi}."
+    """
+    sop = state['sop']
+
+    if not sop.use_mimic_analyst:
+        return AgentOutput(
+            agent_name="MIMIC Prescribing Analyst",
+            findings="MIMIC analysis skipped as per SOP.",
+        )
+
+    mimic_db_path = knowledge_stores.get('mimic_db_path')
+    if not mimic_db_path:
+        return AgentOutput(
+            agent_name="MIMIC Prescribing Analyst",
+            findings=(
+                "MIMIC-III database not available. "
+                "In MIMIC-III, the drug was prescribed in 0 admissions. "
+                "Notable DDI pairs observed in database: 0."
+            ),
+        )
+
+    # Extract the drug name from the task description using the sql_coder LLM
+    extraction_prompt = ChatPromptTemplate.from_messages([
+        ("system", "Extract only the primary drug name from the following task. "
+                   "Respond with just the drug name, nothing else."),
+        ("human", "{task}"),
+    ])
+    drug_name_raw = (extraction_prompt | sql_coder_llm | StrOutputParser()).invoke(
+        {"task": task_description}
+    ).strip().strip('"').strip("'")
+    drug_name = drug_name_raw.split()[0]  # take first word if multi-word response
+    print(f"[MIMIC Analyst] Extracted drug name: '{drug_name}'")
+
+    top_k = sop.top_coprescription_k
+
+    try:
+        con = duckdb.connect(mimic_db_path, read_only=True)
+
+        # 1. Admission count
+        admission_count = con.execute(f"""
+            SELECT COUNT(DISTINCT HADM_ID)
+            FROM prescriptions
+            WHERE UPPER(DRUG) LIKE UPPER('%{drug_name}%')
+               OR UPPER(DRUG_NAME_GENERIC) LIKE UPPER('%{drug_name}%')
+               OR UPPER(DRUG_NAME_POE) LIKE UPPER('%{drug_name}%')
+        """).fetchone()[0]
+        print(f"[MIMIC Analyst] Admission count for '{drug_name}': {admission_count}")
+
+        # 2. Top co-prescriptions
+        coprescriptions = con.execute(f"""
+            SELECT p2.DRUG_NAME_GENERIC, COUNT(DISTINCT p2.HADM_ID) AS co_count
+            FROM prescriptions p1
+            JOIN prescriptions p2 ON p1.HADM_ID = p2.HADM_ID
+            WHERE (UPPER(p1.DRUG) LIKE UPPER('%{drug_name}%')
+                   OR UPPER(p1.DRUG_NAME_GENERIC) LIKE UPPER('%{drug_name}%'))
+              AND UPPER(p2.DRUG_NAME_GENERIC) NOT LIKE UPPER('%{drug_name}%')
+              AND p2.DRUG_NAME_GENERIC IS NOT NULL
+              AND p2.DRUG_NAME_GENERIC != ''
+            GROUP BY p2.DRUG_NAME_GENERIC
+            ORDER BY co_count DESC
+            LIMIT {top_k}
+        """).fetchall()
+
+        # 3. Total concurrent DDI admissions (across all co-prescriptions combined)
+        ddi_count = sum(row[1] for row in coprescriptions[:3]) if coprescriptions else 0
+
         con.close()
 
-        # Step 2: build the SQL generation chain
-        sql_generation_prompt = ChatPromptTemplate.from_messages([
-            (
-                "system",
-                f"You are an expert SQL writer specialising in DuckDB. "
-                f"The database contains MIMIC-III patient data with this schema:\n"
-                f"{schema.to_string()}\n\n"
-                f"IMPORTANT: all column names in your query MUST be uppercase "
-                f"(e.g. SELECT SUBJECT_ID, ICD9_CODE ...).\n\n"
-                f"Key mappings:\n"
-                f"  - Type 2 Diabetes (T2DM)         → ICD9_CODE = '25000'\n"
-                f"  - Creatinine (renal impairment)  → ITEMID 50912, VALUENUM 1.5–3.0\n"
-                f"  - HbA1c (uncontrolled T2DM)      → ITEMID 50852, VALUENUM > 8.0",
-            ),
-            (
-                "human",
-                "Write a SQL query to count the number of unique patients "
-                "who meet the following criteria: {task}",
-            ),
-        ])
+        # Format findings
+        coprescription_str = ', '.join(
+            f"{row[0]} ({row[1]})" for row in coprescriptions
+        ) if coprescriptions else "No co-prescriptions found"
 
-        sql_chain = sql_generation_prompt | sql_coder_llm | StrOutputParser()
+        findings = (
+            f"In MIMIC-III, {drug_name} was prescribed in {admission_count} admissions. "
+            f"Top co-prescriptions: {coprescription_str}. "
+            f"Notable DDI pairs observed in database: {ddi_count}."
+        )
+        print(f"[MIMIC Analyst] Findings summary: {admission_count} admissions, "
+              f"{len(coprescriptions)} co-prescriptions found.")
 
-        print(f"[Analyst] Generating SQL for: {task_description}")
-        raw_sql = sql_chain.invoke({"task": task_description})
+    except Exception as e:
+        findings = (
+            f"In MIMIC-III, {drug_name} was prescribed in 0 admissions. "
+            f"Top co-prescriptions: query error ({e}). "
+            f"Notable DDI pairs observed in database: 0."
+        )
+        print(f"[MIMIC Analyst] Query error: {e}")
 
-        # Strip markdown code fences if the LLM wrapped the query
-        sql_query = raw_sql.strip().replace("```sql", "").replace("```", "").strip()
-        print(f"[Analyst] Generated SQL:\n{sql_query}")
+    return AgentOutput(agent_name="MIMIC Prescribing Analyst", findings=findings)
 
-        # Step 3: execute the query and extract the patient count
-        try:
-            con = duckdb.connect(db_path)
-            result = con.execute(sql_query).fetchone()
-            patient_count = result[0] if result else 0
-            con.close()
 
-            findings = (
-                f"Generated SQL Query:\n{sql_query}\n\n"
-                f"Estimated eligible patient count from the database: {patient_count}."
-            )
-            print(f"[Analyst] Estimated eligible patients: {patient_count}")
+# ---------------------------------------------------------------------------
+# Interaction DB Analyst
+# ---------------------------------------------------------------------------
 
-        except Exception as e:
-            findings = f"Error executing SQL query: {e}. Defaulting to a count of 0."
-            print(f"[Analyst] Query execution error: {e}")
+def _run_interaction_db_analyst(
+    task_description: str,
+    state: TeamState,
+    knowledge_stores: dict,
+) -> AgentOutput:
+    """
+    Query the DrugBank/DDI DuckDB to count known interactions for the drug.
 
-        return AgentOutput(agent_name="Patient Cohort Analyst", findings=findings)
+    Output format (parsed by interaction_completeness_evaluator):
+      "Drug {name} has {N} known interactions in the database: {N}."
+    """
+    sop = state['sop']
 
-    return patient_cohort_analyst
+    if not sop.use_interaction_db_analyst:
+        return AgentOutput(
+            agent_name="Interaction DB Analyst",
+            findings="Interaction DB analysis skipped as per SOP. "
+                     "Drug has 0 known interactions in the database: 0.",
+        )
+
+    drugbank_db_path = knowledge_stores.get('drugbank_db_path')
+    if not drugbank_db_path:
+        return AgentOutput(
+            agent_name="Interaction DB Analyst",
+            findings="DrugBank database not available. "
+                     "Drug has 0 known interactions in the database: 0.",
+        )
+
+    # Extract drug name from task (naive: take the first capitalised word)
+    match = re.search(r'\b([A-Z][a-zA-Z]+(?:\s[A-Z][a-zA-Z]+)?)\b', task_description)
+    drug_name = match.group(1) if match else task_description.split()[0]
+    print(f"[Interaction DB Analyst] Drug name: '{drug_name}'")
+
+    try:
+        con = duckdb.connect(drugbank_db_path, read_only=True)
+        count = con.execute(f"""
+            SELECT COUNT(*) FROM drug_interactions
+            WHERE UPPER(drug_a) LIKE UPPER('%{drug_name}%')
+               OR UPPER(drug_b) LIKE UPPER('%{drug_name}%')
+        """).fetchone()[0]
+        con.close()
+
+        findings = (
+            f"Drug {drug_name} has {count} known interactions in the database: {count}."
+        )
+        print(f"[Interaction DB Analyst] {count} interactions found for '{drug_name}'.")
+
+    except Exception as e:
+        findings = (
+            f"Drug {drug_name} has 0 known interactions in the database: 0. "
+            f"(Query error: {e})"
+        )
+        print(f"[Interaction DB Analyst] Query error: {e}")
+
+    return AgentOutput(agent_name="Interaction DB Analyst", findings=findings)

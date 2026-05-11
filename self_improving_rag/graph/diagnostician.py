@@ -27,7 +27,7 @@ class Diagnosis(BaseModel):
     root_cause_analysis : explanation referencing the specific scores
     recommendation      : strategic suggestion for the SOP Architect
     """
-    primary_weakness:    Literal['rigor', 'compliance', 'ethics', 'feasibility', 'simplicity']
+    primary_weakness:    Literal['accuracy', 'interactions', 'evidence', 'grounding', 'actionability']
     root_cause_analysis: str = Field(
         description="Detailed analysis of why the weakness occurred, referencing specific scores."
     )
