@@ -1,6 +1,6 @@
 # Self-Improving RAG — Drug Relationship System
 
-[![RAG Drug Relationship System](img/thumbnail.png)](img/demo.mp4)
+![RAG Drug Relationship System](img/demo.gif)
 
 
 A multi-agent RAG system that autonomously improves its own Standard Operating Procedure (SOP) by diagnosing weak evaluation scores and evolving better configurations through a genetic-style loop.
